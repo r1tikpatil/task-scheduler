@@ -1,4 +1,5 @@
 const mysql = require("mysql2/promise");
+const logger = require("../utils/logger");
 
 const pool = mysql.createPool({
   host: process.env.DB_HOST || "mysql",
@@ -9,5 +10,14 @@ const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
 });
+
+pool
+  .query("SELECT 1")
+  .then(() => {
+    logger.info({ module: "mysql" }, "MySQL pool ready");
+  })
+  .catch((err) => {
+    logger.error({ err, module: "mysql" }, "MySQL pool connection failed");
+  });
 
 module.exports = pool;
