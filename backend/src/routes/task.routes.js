@@ -13,6 +13,7 @@ router.post(
 );
 
 router.get("/", taskController.listTasks);
+router.get("/stream", taskController.streamTasks);
 router.get("/:id", taskController.getTaskById);
 router.post("/:id/cancel", taskController.cancelTask);
 

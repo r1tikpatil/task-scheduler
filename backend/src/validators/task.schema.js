@@ -82,6 +82,14 @@ const taskIdSchema = Joi.string().uuid({ version: "uuidv4" }).required().message
   "string.guid": "task id must be a valid UUID",
 });
 
+const streamTasksQuerySchema = Joi.object({
+  status: Joi.string().optional(),
+  clientId: Joi.string().optional(),
+  taskId: Joi.string().uuid({ version: "uuidv4" }).optional().messages({
+    "string.guid": "taskId must be a valid UUID",
+  }),
+});
+
 const validateStatusFilter = (status) => {
   if (!status) {
     return;
@@ -111,8 +119,15 @@ const validateListTasksQuery = (query) => {
 
 const validateTaskId = (taskId) => runValidation(taskIdSchema, taskId);
 
+const validateStreamTasksQuery = (query) => {
+  const validated = runValidation(streamTasksQuerySchema, query);
+  validateStatusFilter(validated.status);
+  return validated;
+};
+
 module.exports = {
   validateSubmitTaskInput,
   validateListTasksQuery,
   validateTaskId,
+  validateStreamTasksQuery,
 };

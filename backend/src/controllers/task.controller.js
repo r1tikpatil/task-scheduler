@@ -1,10 +1,12 @@
 const taskService = require("../services/task.service");
+const sseService = require("../services/sse.service");
 const AppError = require("../utils/AppError");
 const asyncHandler = require("../utils/asyncHandler");
 const {
   validateSubmitTaskInput,
   validateListTasksQuery,
   validateTaskId,
+  validateStreamTasksQuery,
 } = require("../validators/task.schema");
 
 const submitTask = asyncHandler(async (req, res) => {
@@ -58,9 +60,25 @@ const cancelTask = asyncHandler(async (req, res) => {
   res.json(task);
 });
 
+const streamTasks = asyncHandler(async (req, res) => {
+  const filters = validateStreamTasksQuery(req.query);
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+
+  res.flushHeaders();
+
+  sseService.addClient(res, filters);
+
+  req.log.debug({ filters }, "SSE stream opened");
+});
+
 module.exports = {
   submitTask,
   listTasks,
   getTaskById,
   cancelTask,
+  streamTasks,
 };

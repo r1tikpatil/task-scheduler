@@ -6,6 +6,9 @@ const redis = require("./redis/redis");
 const logger = require("./utils/logger");
 const AppError = require("./utils/AppError");
 const taskRoutes = require("./routes/task.routes");
+const workerRoutes = require("./routes/worker.routes");
+const sseService = require("./services/sse.service");
+const workerEngine = require("./services/workerEngine.service");
 
 const PORT = process.env.PORT || 5000;
 const app = express();
@@ -45,6 +48,7 @@ app.get("/health", async (req, res) => {
 });
 
 app.use("/api/tasks", taskRoutes);
+app.use("/api/workers", workerRoutes);
 
 app.use((req, res) => {
   res.status(404).json({
@@ -72,6 +76,8 @@ app.use((err, req, res, next) => {
 
 async function start() {
   await redis.connect();
+  await sseService.start();
+  await workerEngine.start();
 
   app.listen(PORT, () => {
     logger.info({ port: PORT }, "Server started");

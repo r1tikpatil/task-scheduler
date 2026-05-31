@@ -8,6 +8,8 @@ const {
 } = require("../constants/config");
 const AppError = require("../utils/AppError");
 const { mapTask } = require("../utils/task.mapper");
+const { publishFromTask } = require("./taskEvent.service");
+const workerEngine = require("./workerEngine.service");
 
 const TASK_SELECT = `
   SELECT
@@ -76,6 +78,10 @@ const createTask = async ({ clientId, type, priority, payload }) => {
   if (!task) {
     throw new AppError("Failed to create task", 500);
   }
+
+  await publishFromTask(task);
+
+  workerEngine.enqueue(task);
 
   return task;
 };
@@ -208,11 +214,17 @@ const cancelTask = async (taskId) => {
 
     if (status === TASK_STATUS.CANCELLED) {
       await connection.commit();
-      return getTaskById(taskId);
+      const task = await getTaskById(taskId);
+      await publishFromTask(task);
+      return task;
     }
 
     if (!CANCELLABLE_STATUSES.has(status)) {
       throw new AppError(`Cannot cancel task with status ${status}`, 409);
+    }
+
+    if (status === TASK_STATUS.QUEUED) {
+      workerEngine.removeFromQueue(taskId);
     }
 
     await connection.query(
@@ -231,7 +243,14 @@ const cancelTask = async (taskId) => {
         : Promise.resolve(),
     ]);
 
-    return getTaskById(taskId);
+    if (status === TASK_STATUS.RUNNING) {
+      workerEngine.requestCancel(taskId);
+    }
+
+    const task = await getTaskById(taskId);
+    await publishFromTask(task);
+
+    return task;
   } catch (error) {
     await connection.rollback();
     throw error;
