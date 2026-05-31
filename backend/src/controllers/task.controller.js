@@ -1,4 +1,5 @@
 const taskService = require("../services/task.service");
+const seedService = require("../services/seed.service");
 const sseService = require("../services/sse.service");
 const AppError = require("../utils/AppError");
 const asyncHandler = require("../utils/asyncHandler");
@@ -8,6 +9,7 @@ const {
   validateTaskId,
   validateStreamTasksQuery,
 } = require("../validators/task.schema");
+const { validateSeedTasksInput } = require("../validators/analytics.schema");
 
 const submitTask = asyncHandler(async (req, res) => {
   const validatedTask = validateSubmitTaskInput(req.body);
@@ -38,6 +40,28 @@ const listTasks = asyncHandler(async (req, res) => {
   res.json(result);
 });
 
+const getTaskStats = asyncHandler(async (req, res) => {
+  const stats = await taskService.getTaskStats();
+
+  res.json(stats);
+});
+
+const seedTasks = asyncHandler(async (req, res) => {
+  if (process.env.SEED_ENABLED !== "true") {
+    throw new AppError("Seed endpoint is disabled", 403);
+  }
+
+  const { count } = validateSeedTasksInput(req.body);
+  const result = await seedService.seedTasks(count);
+
+  req.log.info({ created: result.created }, "Seed tasks created");
+
+  res.status(201).json({
+    message: `Created ${result.created} demo tasks`,
+    created: result.created,
+  });
+});
+
 const getTaskById = asyncHandler(async (req, res) => {
   const taskId = validateTaskId(req.params.id);
 
@@ -60,6 +84,16 @@ const cancelTask = asyncHandler(async (req, res) => {
   res.json(task);
 });
 
+const retryTask = asyncHandler(async (req, res) => {
+  const taskId = validateTaskId(req.params.id);
+
+  const task = await taskService.retryTask(taskId);
+
+  req.log.info({ taskId: task.id, status: task.status }, "Task retried from DLQ");
+
+  res.json(task);
+});
+
 const streamTasks = asyncHandler(async (req, res) => {
   const filters = validateStreamTasksQuery(req.query);
 
@@ -78,7 +112,10 @@ const streamTasks = asyncHandler(async (req, res) => {
 module.exports = {
   submitTask,
   listTasks,
+  getTaskStats,
+  seedTasks,
   getTaskById,
   cancelTask,
+  retryTask,
   streamTasks,
 };

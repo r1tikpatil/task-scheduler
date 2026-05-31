@@ -12,9 +12,12 @@ router.post(
   taskController.submitTask,
 );
 
+router.post("/seed", taskController.seedTasks);
+router.get("/stats", taskController.getTaskStats);
 router.get("/", taskController.listTasks);
 router.get("/stream", taskController.streamTasks);
 router.get("/:id", taskController.getTaskById);
 router.post("/:id/cancel", taskController.cancelTask);
+router.post("/:id/retry", taskController.retryTask);
 
 module.exports = router;

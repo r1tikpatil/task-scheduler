@@ -7,6 +7,7 @@ const logger = require("./utils/logger");
 const AppError = require("./utils/AppError");
 const taskRoutes = require("./routes/task.routes");
 const workerRoutes = require("./routes/worker.routes");
+const analyticsRoutes = require("./routes/analytics.routes");
 const sseService = require("./services/sse.service");
 const workerEngine = require("./services/workerEngine.service");
 
@@ -36,6 +37,7 @@ app.get("/health", async (req, res) => {
       status: "ok",
       mysql: "up",
       redis: "up",
+      workers: workerEngine.getStats(),
     });
   } catch (err) {
     req.log.error({ err }, "Health check failed");
@@ -49,6 +51,7 @@ app.get("/health", async (req, res) => {
 
 app.use("/api/tasks", taskRoutes);
 app.use("/api/workers", workerRoutes);
+app.use("/api/analytics", analyticsRoutes);
 
 app.use((req, res) => {
   res.status(404).json({

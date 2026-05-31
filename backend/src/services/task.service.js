@@ -259,9 +259,80 @@ const cancelTask = async (taskId) => {
   }
 };
 
+const retryTask = async (taskId) => {
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const [rows] = await connection.query(
+      "SELECT id, status FROM tasks WHERE id = ? FOR UPDATE",
+      [taskId],
+    );
+
+    if (rows.length === 0) {
+      throw new AppError("Task not found", 404);
+    }
+
+    if (rows[0].status !== TASK_STATUS.DEAD_LETTER) {
+      throw new AppError("Task is not in dead letter queue", 409);
+    }
+
+    await connection.query(
+      `UPDATE tasks
+       SET status = ?, retries = 0, error_message = NULL, worker_id = NULL,
+           started_at = NULL, completed_at = NULL
+       WHERE id = ?`,
+      [TASK_STATUS.QUEUED, taskId],
+    );
+
+    await connection.query("DELETE FROM dead_letter_tasks WHERE task_id = ?", [
+      taskId,
+    ]);
+
+    await connection.commit();
+
+    await redis.del(taskProgressKey(taskId));
+
+    const task = await getTaskById(taskId);
+
+    workerEngine.enqueue(task);
+    await publishFromTask(task);
+
+    return task;
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+};
+
+const getTaskStats = async () => {
+  const [rows] = await pool.query(
+    `SELECT status, COUNT(*) AS count FROM tasks GROUP BY status`,
+  );
+
+  const stats = Object.values(TASK_STATUS).reduce((acc, status) => {
+    acc[status] = 0;
+    return acc;
+  }, {});
+
+  stats.total = 0;
+
+  for (const row of rows) {
+    stats[row.status] = Number(row.count);
+    stats.total += Number(row.count);
+  }
+
+  return stats;
+};
+
 module.exports = {
   createTask,
   getTaskById,
   listTasks,
   cancelTask,
+  retryTask,
+  getTaskStats,
 };
