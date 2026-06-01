@@ -45,6 +45,7 @@ class WorkerEngine {
   constructor() {
     this.queue = new TaskQueue();
     this.runningTasks = new Map();
+    this.pendingStarts = 0;
     this.poolSize = WORKER_POOL_SIZE;
     this.started = false;
   }
@@ -93,21 +94,29 @@ class WorkerEngine {
   }
 
   getStats() {
+    const busyWorkers = this.runningTasks.size;
+
     return {
       poolSize: this.poolSize,
-      busyWorkers: this.runningTasks.size,
-      idleWorkers: this.poolSize - this.runningTasks.size,
+      busyWorkers,
+      idleWorkers: Math.max(0, this.poolSize - busyWorkers),
       queuedTasks: this.queue.size(),
     };
   }
 
+  activeWorkerSlots() {
+    return this.runningTasks.size + this.pendingStarts;
+  }
+
   schedule() {
-    while (this.runningTasks.size < this.poolSize) {
+    while (this.activeWorkerSlots() < this.poolSize) {
       const task = this.queue.dequeue();
 
       if (!task) {
         break;
       }
+
+      this.pendingStarts += 1;
 
       this.startTask(task).catch((err) => {
         logger.error(
@@ -179,69 +188,74 @@ class WorkerEngine {
   }
 
   async startTask(task) {
-    const workerId = randomUUID();
+    try {
+      const workerId = randomUUID();
 
-    const [result] = await pool.query(
-      `UPDATE tasks
-       SET status = ?, started_at = CURRENT_TIMESTAMP, worker_id = ?, error_message = NULL
-       WHERE id = ? AND status = ?`,
-      [TASK_STATUS.RUNNING, workerId, task.id, TASK_STATUS.QUEUED],
-    );
-
-    if (result.affectedRows === 0) {
-      return;
-    }
-
-    const runningTask = await this.fetchTask(task.id);
-
-    if (!runningTask) {
-      return;
-    }
-
-    await publishFromTask(runningTask, 0);
-    await redis.set(taskProgressKey(task.id), "0", { EX: 3600 });
-
-    const worker = new Worker(WORKER_SCRIPT, {
-      workerData: {
-        taskId: task.id,
-        durationMs: this.randomDurationMs(),
-        progressSteps: TASK_PROGRESS_STEPS,
-      },
-    });
-
-    const entry = {
-      worker,
-      workerId,
-      task: runningTask,
-      intentionalCancel: false,
-    };
-
-    this.runningTasks.set(task.id, entry);
-
-    worker.on("message", (message) => {
-      this.handleWorkerMessage(task.id, message).catch((err) => {
-        logger.error(
-          { err, taskId: task.id, module: "worker-engine" },
-          "Worker message handler failed",
-        );
-      });
-    });
-
-    worker.on("error", (err) => {
-      logger.error(
-        { err, taskId: task.id, module: "worker-engine" },
-        "Worker thread error",
+      const [result] = await pool.query(
+        `UPDATE tasks
+         SET status = ?, started_at = CURRENT_TIMESTAMP, worker_id = ?, error_message = NULL
+         WHERE id = ? AND status = ?`,
+        [TASK_STATUS.RUNNING, workerId, task.id, TASK_STATUS.QUEUED],
       );
-    });
 
-    worker.on("exit", (code) => {
-      this.handleWorkerExit(task.id, code).catch((err) => {
+      if (result.affectedRows === 0) {
+        return;
+      }
+
+      const runningTask = await this.fetchTask(task.id);
+
+      if (!runningTask) {
+        return;
+      }
+
+      await publishFromTask(runningTask, 0);
+      await redis.set(taskProgressKey(task.id), "0", { EX: 3600 });
+
+      const worker = new Worker(WORKER_SCRIPT, {
+        workerData: {
+          taskId: task.id,
+          durationMs: this.randomDurationMs(),
+          progressSteps: TASK_PROGRESS_STEPS,
+        },
+      });
+
+      const entry = {
+        worker,
+        workerId,
+        task: runningTask,
+        intentionalCancel: false,
+      };
+
+      this.runningTasks.set(task.id, entry);
+
+      worker.on("message", (message) => {
+        this.handleWorkerMessage(task.id, message).catch((err) => {
+          logger.error(
+            { err, taskId: task.id, module: "worker-engine" },
+            "Worker message handler failed",
+          );
+        });
+      });
+
+      worker.on("error", (err) => {
         logger.error(
           { err, taskId: task.id, module: "worker-engine" },
-          "Worker exit handler failed",
+          "Worker thread error",
         );
       });
-    });
+
+      worker.on("exit", (code) => {
+        this.handleWorkerExit(task.id, code).catch((err) => {
+          logger.error(
+            { err, taskId: task.id, module: "worker-engine" },
+            "Worker exit handler failed",
+          );
+        });
+      });
+    } finally {
+      this.pendingStarts = Math.max(0, this.pendingStarts - 1);
+      this.schedule();
+    }
   }
 
   async handleWorkerMessage(taskId, message) {
@@ -327,6 +341,10 @@ class WorkerEngine {
     }
 
     if (code === 0) {
+      if (entry) {
+        await this.cleanupWorker(taskId);
+        this.schedule();
+      }
       return;
     }
 
