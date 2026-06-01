@@ -12,6 +12,7 @@ import {
   fetchTasks,
   fetchWorkerStats,
   retryTask as retryTaskApi,
+  seedTasks as seedTasksApi,
   submitTask as submitTaskApi,
 } from "../api/tasks";
 import { useTaskStream } from "../hooks/useTaskStream";
@@ -116,6 +117,15 @@ export function TaskProvider({ children }) {
     [upsertTask, refreshStats],
   );
 
+  const seedDemoTasks = useCallback(
+    async (count = 55) => {
+      const result = await seedTasksApi(count);
+      await refreshTasks();
+      return result;
+    },
+    [refreshTasks],
+  );
+
   const tasks = useMemo(() => Object.values(tasksById), [tasksById]);
 
   const value = useMemo(
@@ -131,6 +141,7 @@ export function TaskProvider({ children }) {
       submitTask,
       cancelTask,
       retryTask,
+      seedDemoTasks,
     }),
     [
       tasks,
@@ -144,6 +155,7 @@ export function TaskProvider({ children }) {
       submitTask,
       cancelTask,
       retryTask,
+      seedDemoTasks,
     ],
   );
 

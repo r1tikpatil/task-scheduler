@@ -14,12 +14,45 @@ const randomItem = (items) => items[Math.floor(Math.random() * items.length)];
 
 const randomPriority = () => Math.floor(Math.random() * 5) + 1;
 
-const buildSeedPayload = (index, type) => ({
-  seed: true,
-  index,
-  source: "seed-script",
-  detail: `Demo ${type} job #${index}`,
-});
+const SEED_PAYLOAD_BUILDERS = [
+  (index, type) => ({
+    seed: true,
+    index,
+    source: "dashboard-seed",
+    type,
+    file: `input-${index}.dat`,
+    sizeKb: Math.floor(Math.random() * 5000) + 100,
+  }),
+  (index, type) => ({
+    seed: true,
+    index,
+    source: "dashboard-seed",
+    type,
+    reportId: `RPT-${1000 + index}`,
+    format: randomItem(["pdf", "csv", "xlsx"]),
+  }),
+  (index, type) => ({
+    seed: true,
+    index,
+    source: "dashboard-seed",
+    type,
+    records: Math.floor(Math.random() * 10000) + 50,
+    batchSize: randomItem([100, 250, 500]),
+  }),
+  (index, type) => ({
+    seed: true,
+    index,
+    source: "dashboard-seed",
+    type,
+    recipient: `user${index}@example.com`,
+    template: randomItem(["welcome", "alert", "digest"]),
+  }),
+];
+
+const buildSeedPayload = (index, type) => {
+  const builder = randomItem(SEED_PAYLOAD_BUILDERS);
+  return builder(index, type);
+};
 
 const seedTasks = async (count = DEFAULT_SEED_COUNT) => {
   if (count < MIN_SEED_COUNT || count > MAX_SEED_COUNT) {

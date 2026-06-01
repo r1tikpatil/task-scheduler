@@ -1,6 +1,12 @@
 const { parentPort, workerData } = require("worker_threads");
 
-const { taskId, durationMs, progressSteps } = workerData;
+const {
+  taskId,
+  durationMs,
+  progressSteps,
+  simulateFailure = false,
+  failAfterStep = Math.ceil(progressSteps / 2),
+} = workerData;
 
 let cancelled = false;
 
@@ -33,6 +39,15 @@ const run = async () => {
       taskId,
       progress: Math.round((step / progressSteps) * 100),
     });
+
+    if (simulateFailure && step >= failAfterStep) {
+      parentPort.postMessage({
+        type: "FAILED",
+        taskId,
+        error: "Simulated mid-task failure (demo retry / dead letter flow)",
+      });
+      return;
+    }
   }
 
   parentPort.postMessage({ type: "COMPLETED", taskId });

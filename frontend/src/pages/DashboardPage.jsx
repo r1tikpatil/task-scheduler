@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { DASHBOARD_PROGRESS_STATUSES, STATUS_LABELS } from "../constants/enums";
 import { useTasks } from "../context/TaskContext";
 import WorkerStatsCard, { StatusGroup } from "../components/DashboardWidgets";
+import DashboardDemoActions from "../components/DashboardDemoActions";
 import TaskSubmitForm from "../components/TaskSubmitForm";
 
 export default function DashboardPage() {
@@ -60,6 +61,8 @@ export default function DashboardPage() {
         <WorkerStatsCard />
         <TaskSubmitForm />
       </div>
+
+      <DashboardDemoActions />
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         {DASHBOARD_PROGRESS_STATUSES.map((status) => (

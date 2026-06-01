@@ -211,11 +211,19 @@ class WorkerEngine {
       await publishFromTask(runningTask, 0);
       await redis.set(taskProgressKey(task.id), "0", { EX: 3600 });
 
+      const payload = runningTask.payload ?? {};
+      const simulateFailure = Boolean(payload.simulateFailure);
+      const failAfterStep = Number.isInteger(payload.failAfterStep)
+        ? payload.failAfterStep
+        : Math.ceil(TASK_PROGRESS_STEPS / 2);
+
       const worker = new Worker(WORKER_SCRIPT, {
         workerData: {
           taskId: task.id,
           durationMs: this.randomDurationMs(),
           progressSteps: TASK_PROGRESS_STEPS,
+          simulateFailure,
+          failAfterStep,
         },
       });
 
