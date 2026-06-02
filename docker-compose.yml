@@ -1,16 +1,15 @@
 services:
   mysql:
     image: mysql:8.0
-    container_name: task-engine-mysql
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: Admin123root
-      MYSQL_DATABASE: task_manager
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-Admin123root}
+      MYSQL_DATABASE: ${DB_DATABASE:-task_manager}
     volumes:
       - mysql_data:/var/lib/mysql
       - ./backend/src/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pAdmin123root"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${DB_PASSWORD:-Admin123root}"]
       interval: 5s
       timeout: 5s
       retries: 12
@@ -18,7 +17,6 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: task-engine-redis
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -29,7 +27,6 @@ services:
   backend:
     build:
       context: ./backend
-    container_name: task-engine-backend
     restart: unless-stopped
     ports:
       - "${BACKEND_PORT:-5000}:5000"
@@ -37,13 +34,13 @@ services:
       DB_HOST: mysql
       DB_PORT: 3306
       DB_USER: root
-      DB_PASSWORD: Admin123root
-      DB_DATABASE: task_manager
+      DB_PASSWORD: ${DB_PASSWORD:-Admin123root}
+      DB_DATABASE: ${DB_DATABASE:-task_manager}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       PORT: 5000
-      WORKER_POOL_SIZE: 4
-      SEED_ENABLED: "true"
+      WORKER_POOL_SIZE: ${WORKER_POOL_SIZE:-4}
+      SEED_ENABLED: ${SEED_ENABLED:-true}
     depends_on:
       mysql:
         condition: service_healthy
@@ -54,8 +51,7 @@ services:
     build:
       context: ./frontend
       args:
-        VITE_API_URL: ""
-    container_name: task-engine-frontend
+        VITE_API_URL: ${VITE_API_URL:-}
     restart: unless-stopped
     ports:
       - "${FRONTEND_PORT:-3000}:80"
