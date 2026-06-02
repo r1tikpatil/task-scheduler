@@ -8,6 +8,7 @@ const { TASK_STATUS } = require("../constants/enum");
 const { taskProgressKey, taskCancelKey } = require("../constants/redis.keys");
 const {
   WORKER_POOL_SIZE,
+  MAX_RUNNING_PER_CLIENT,
   MAX_TASK_RETRIES,
   TASK_MIN_DURATION_MS,
   TASK_MAX_DURATION_MS,
@@ -43,11 +44,14 @@ const WORKER_SCRIPT = path.join(__dirname, "../workers/task.worker.js");
 
 class WorkerEngine {
   constructor() {
-    this.queue = new TaskQueue();
+    this.queue = new TaskQueue({ maxRunningPerClient: MAX_RUNNING_PER_CLIENT });
     this.runningTasks = new Map();
+    this.runningByClient = new Map();
     this.pendingStarts = 0;
     this.poolSize = WORKER_POOL_SIZE;
     this.started = false;
+
+    this.queue.setRunningByClient(this.runningByClient);
   }
 
   async start() {
@@ -115,6 +119,11 @@ class WorkerEngine {
       if (!task) {
         break;
       }
+
+      this.runningByClient.set(
+        task.clientId,
+        (this.runningByClient.get(task.clientId) ?? 0) + 1,
+      );
 
       this.pendingStarts += 1;
 
@@ -188,6 +197,7 @@ class WorkerEngine {
   }
 
   async startTask(task) {
+    let released = false;
     try {
       const workerId = randomUUID();
 
@@ -199,12 +209,20 @@ class WorkerEngine {
       );
 
       if (result.affectedRows === 0) {
+        const current = this.runningByClient.get(task.clientId) ?? 0;
+        if (current <= 1) this.runningByClient.delete(task.clientId);
+        else this.runningByClient.set(task.clientId, current - 1);
+        released = true;
         return;
       }
 
       const runningTask = await this.fetchTask(task.id);
 
       if (!runningTask) {
+        const current = this.runningByClient.get(task.clientId) ?? 0;
+        if (current <= 1) this.runningByClient.delete(task.clientId);
+        else this.runningByClient.set(task.clientId, current - 1);
+        released = true;
         return;
       }
 
@@ -262,6 +280,11 @@ class WorkerEngine {
       });
     } finally {
       this.pendingStarts = Math.max(0, this.pendingStarts - 1);
+      if (!released && !this.runningTasks.has(task.id)) {
+        const current = this.runningByClient.get(task.clientId) ?? 0;
+        if (current <= 1) this.runningByClient.delete(task.clientId);
+        else this.runningByClient.set(task.clientId, current - 1);
+      }
       this.schedule();
     }
   }
@@ -446,6 +469,14 @@ class WorkerEngine {
   }
 
   async cleanupWorker(taskId) {
+    const entry = this.runningTasks.get(taskId);
+    if (entry?.task?.clientId) {
+      const clientId = entry.task.clientId;
+      const current = this.runningByClient.get(clientId) ?? 0;
+      if (current <= 1) this.runningByClient.delete(clientId);
+      else this.runningByClient.set(clientId, current - 1);
+    }
+
     this.runningTasks.delete(taskId);
   }
 }
