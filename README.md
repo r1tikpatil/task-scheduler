@@ -5,8 +5,16 @@ A Dockerized task queue system with priority scheduling, worker threads, real-ti
 ## Quick start
 
 ```bash
+docker compose up
+```
+
+If you change Dockerfiles or dependency layers and want a fresh rebuild:
+
+```bash
 docker compose up --build
 ```
+
+Optional: override defaults (ports, DB password, worker count) by copying `.env.example` to `.env` and editing values.
 
 API base URL: `http://localhost:5000`  
 Frontend URL: `http://localhost:3000`
@@ -28,7 +36,7 @@ curl -X POST http://localhost:5000/api/tasks/seed \
 Or from the backend container:
 
 ```bash
-docker exec task-engine-backend npm run seed
+docker compose exec backend npm run seed
 ```
 
 ## Frontend (React)
@@ -62,7 +70,8 @@ Express API ──► MySQL (durable tasks, clients, DLQ)
     ├── Redis ◄────┘ progress, rate limits, pub/sub
     │
     ├── Worker Engine (worker_threads)
-    │       ├── in-memory priority + fair queue
+    │       ├── in-memory per-client RR scheduler
+    │       ├── priority ordering within each client queue
     │       └── N concurrent workers (default 4)
     │
     └── SSE stream ◄── Redis pub/sub fan-out
@@ -75,7 +84,7 @@ Express API ──► MySQL (durable tasks, clients, DLQ)
 | Task persistence | MySQL |
 | Live progress | Redis + SSE |
 | Execution | Node.js `worker_threads` |
-| Queue | In-memory heap with MySQL reload on startup |
+| Queue | In-memory per-client round-robin + per-client priority queues |
 | Real-time updates | Redis pub/sub → single SSE broadcaster |
 | Logging | Pino JSON logs |
 
@@ -92,7 +101,7 @@ Express API ──► MySQL (durable tasks, clients, DLQ)
 | `POST` | `/api/tasks/:id/cancel` | Cancel queued/running |
 | `POST` | `/api/tasks/:id/retry` | Retry dead-lettered task |
 | `GET` | `/api/tasks/stream` | SSE live updates |
-| `POST` | `/api/tasks/seed` | Seed 50–200 demo tasks |
+| `POST` | `/api/tasks/seed` | Seed demo tasks (50-200, default 55) |
 
 **Submit example**
 
@@ -128,19 +137,21 @@ Returns:
 
 ## Fairness mechanism
 
-Scheduling uses a **priority-first, fair-second** in-memory queue:
+Scheduling prevents starvation by doing **client-fair scheduling**:
 
-1. Higher `priority` (5 highest) dequeues first
-2. At equal priority, the client **least recently served** goes next
-3. Then FIFO by `created_at`
+1. **Client round-robin (RR):** the scheduler rotates through clients that currently have queued tasks.
+2. **Priority within each client:** for the selected client, tasks are picked by highest `priority` first, then FIFO by `created_at`.
+3. **Per-client in-flight cap:** when multiple clients are competing, each client is allowed to have at most `MAX_RUNNING_PER_CLIENT` tasks running/reserved at the same time.
+4. **No preemption:** running tasks are not interrupted; fairness is applied when assigning the next free worker slot.
 
-This prevents one client from monopolizing the queue with many high-priority tasks while still honoring priority ordering.
+This ensures that a single client flooding the queue with high-priority tasks cannot indefinitely block other clients.
+
+Example (pool size `3`, cap `1`): if client `A` has many `P5` tasks and clients `B`, `C`, `D` have fewer lower-priority tasks, dispatch still rotates by client (`A -> B -> C -> D -> ...`) while each client's own queue remains priority-ordered.
 
 **Trade-offs**
 
-- Fairness is per-process and in-memory; restarting the node resets client service history
-- Strict global fairness would need shared state (Redis/ZK); this is a pragmatic single-node approach
-- Running tasks are never preempted
+- Fairness is per-process and in-memory; restarting the node resets the RR pointer/in-flight tracking
+- Fairness is client-level (anti-starvation), not globally strict priority across all clients
 
 ## Worker engine
 
@@ -165,6 +176,7 @@ This prevents one client from monopolizing the queue with many high-priority tas
 | `DB_DATABASE` | `task_manager` | Database name |
 | `REDIS_HOST` | `redis` | Redis host |
 | `WORKER_POOL_SIZE` | `4` | Concurrent workers |
+| `MAX_RUNNING_PER_CLIENT` | `1` | In-flight (reserved) tasks per client when multiple clients have work |
 | `SEED_ENABLED` | `false` | Enable `/api/tasks/seed` |
 | `PORT` | `5000` | API port |
 
@@ -180,9 +192,8 @@ This prevents one client from monopolizing the queue with many high-priority tas
 
 ## Trade-offs and shortcuts
 
-- In-memory queue instead of distributed queue (appropriate for take-home scope)
+- In-memory queue instead of distributed queue
 - Seed endpoint gated by `SEED_ENABLED` instead of admin auth
-- Simulated worker sleep instead of real job processing
 - No automated test suite (focus on working docker-compose demo)
 - Single Redis subscriber for SSE (sufficient for one node)
 
