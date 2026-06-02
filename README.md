@@ -2,6 +2,17 @@
 
 A Dockerized task queue system with priority scheduling, worker threads, real-time SSE updates, rate limiting, and analytics.
 
+## Tech stack
+
+- Backend: Node.js, Express
+- Frontend: React.js
+- Database: MySQL 8
+- Cache / pub-sub / rate-limit counters: Redis 7
+- Worker execution: Node.js `worker_threads`
+- Realtime updates: Server-Sent Events (SSE) via Redis pub/sub
+- Containerization: Docker, Docker Compose
+- Web serving / reverse proxy (frontend container): Nginx
+
 ## Quick start
 
 ```bash
